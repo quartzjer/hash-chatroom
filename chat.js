@@ -6,6 +6,8 @@ var argv = require("optimist")
   .default("seeds", "./seeds.json")
   .demand(1).argv;
 
+if(argv.v) tele.debug(console.log);
+
 // set up our readline interface
 rl = require("readline").createInterface(process.stdin, process.stdout, null);
 function log(line){
@@ -33,8 +35,8 @@ if(fs.existsSync(argv.id))
   });
 }
 
-var parts = argv._[0].split("@");
-if(!parts[1])
+var parts = argv._[0].toString().split("@");
+if(!parts[0])
 {
   log("invalid room@memberhash argument");
   process.exit(1);
@@ -56,45 +58,62 @@ function init()
   chat.online(function(err){
     log((err?err:"online as "+chat.hashname));
     if(err) process.exit(0);
-  });  
+    if(memberhash) members[memberhash] = chat.stream(memberhash, handshake)
+      .send({type:"_chat", nick:id.nick, room:room})
+      .send({type:"_members", room:room});
+    else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
+  });
 
   chat.listen("_chat", handshake);
   chat.listen("_members", function(chat, packet, callback){
+    if(callback) callback();
     // send members in chunks
+    var mlist = Object.keys(members);
+    while(mlist.length > 0)
+    {
+      var chunk = mlist.slice(0, 10);
+      mlist = mlist.slice(10);
+      var end = mlist.length > 0 ? true : false;
+      packet.stream.send({members:mlist, end:end});
+    }
   });
 }
 
-var streams = {};
 var nicks = {};
 function incoming(chat, packet, callback)
 {
   callback();
   if(packet.js.message || packet.js.nick) packet.stream.send({}); // receipt ack, maybe have flag for stream to auto-ack?
 
-  if(packet.js.message) log("["+(packet.stream.nick||packet.from.hashname)+"] "+packet.js.message);
   if(packet.js.nick) nickel(packet.from.hashname, packet.js.nick);
+  if(packet.js.message) log("["+(packet.stream.nick||packet.from.hashname)+"] "+packet.js.message);
 }
 function handshake(chat, packet, callback)
 {
   if(callback) callback();
+  if(packet.js.room != room)
+  {
+    console.log(packet.js);
+    packet.stream.send({err:"unknown room"});
+    return;
+  }
   log("connected "+packet.js.nick+" ("+packet.from.hashname+")");
-  streams[packet.from.hashname] = packet.stream;
+  members[packet.from.hashname] = packet.stream;
   packet.stream.handler = incoming;
   nickel(packet.from.hashname, packet.js.nick);
   if(packet.js.seq == 0) packet.stream.send({nick:id.nick});
   else packet.stream.send({});
 }
 
-// update nick and refresh prompt
+// update nick
+var nicks = {};
 function nickel(hashname, nick)
 {
-  streams[hashname].nick = nick;
   nicks[nick] = hashname;
-  if(!to || to == hashname) cmds.to(hashname);
+  members[hashname].nick = nick;
 }
 
 // our chat handler
-var to;
 rl.on('line', function(line) {
   if(line.indexOf("/") == 0) {
     var parts = line.split(" ");
@@ -102,8 +121,9 @@ rl.on('line', function(line) {
     if(cmds[cmd]) cmds[cmd](parts.join(" "));
     else log("I don't know how to "+cmd);
   }else{
-    if(!to) log("who are you talking to? /to hashname|nickname");
-    else streams[to].send({message:line});
+    Object.keys(members).forEach(function(member){
+      members[member].send({message:line, nick:nick});
+    })
   }
   rl.prompt();
 });
@@ -114,17 +134,12 @@ cmds.quit = function(err){
   process.exit();
 }
 cmds.whoami = function(){
-  log("my hashname is "+ chat.hashname);  
+  log(room+"@"+chat.hashname);
 }
-cmds.who = function(){
-  if(!to) return log("talking to nobody");
-  log("talking to "+streams[to].nick+" ("+to+")");
-}
-cmds.to = function(targ){
-  to = nicks[targ] || targ;
-  if(!streams[to]) streams[to] = chat.stream(to, handshake).send({type:"_im", nick:id.nick});
-  rl.setPrompt(id.nick+"->"+(streams[to].nick||to)+"> ");
-  rl.prompt();
+cmds.who = cmds.whois = function(arg){
+  if(!arg) return Object.keys(members).forEach(cmds.who);
+  if(nicks[arg]) log(arg+" is "+nicks[arg]);
+  if(members[arg]) log(arg+" is "+members[arg].nick);
 }
 cmds["42"] = function(){
   log("I hash, therefore I am.");
