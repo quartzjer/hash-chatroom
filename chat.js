@@ -58,10 +58,10 @@ function init()
   chat.online(function(err){
     log((err?err:"online as "+chat.hashname));
     if(err) process.exit(0);
-    if(memberhash) members[memberhash] = chat.stream(memberhash, handshake)
-      .send({type:"_chat", nick:id.nick, room:room})
-      .send({type:"_members", room:room});
-    else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
+    if(memberhash) {
+      members[memberhash] = chat.stream(memberhash, handshake).send({type:"_chat", nick:id.nick, room:room})
+      chat.stream(memberhash, memberMesh).send({type:"_members", room:room});
+    } else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
   });
 
   chat.listen("_chat", handshake);
@@ -73,9 +73,18 @@ function init()
     {
       var chunk = mlist.slice(0, 10);
       mlist = mlist.slice(10);
-      var end = mlist.length > 0 ? true : false;
+      var end = mlist.length == 0 ? true : false;
       packet.stream.send({members:mlist, end:end});
     }
+  });
+}
+
+function memberMesh(chat, packet, callback)
+{
+  callback();
+  if(Array.isArray(packet.js.members)) packet.js.members.forEach(function(member){
+    if(members[member]) return;
+    members[member] = chat.stream(member, handshake).send({type:"_chat", nick:id.nick, room:room});
   });
 }
 
@@ -91,7 +100,7 @@ function incoming(chat, packet, callback)
 function handshake(chat, packet, callback)
 {
   if(callback) callback();
-  if(packet.js.room != room)
+  if(packet.js.room && packet.js.room != room)
   {
     console.log(packet.js);
     packet.stream.send({err:"unknown room"});
@@ -110,7 +119,18 @@ var nicks = {};
 function nickel(hashname, nick)
 {
   nicks[nick] = hashname;
+  if(members[hashname].nick && members[hashname].nick != nick) log(members[hashname].nick+" is now known as "+nick);
   members[hashname].nick = nick;
+}
+
+function blast(msg, nick)
+{
+  Object.keys(members).forEach(function(member){
+    var js = {};
+    if(msg) js.message = msg;
+    if(nick) js.nick = nick;
+    members[member].send(js);
+  });
 }
 
 // our chat handler
@@ -120,15 +140,17 @@ rl.on('line', function(line) {
     var cmd = parts.shift().substr(1);
     if(cmds[cmd]) cmds[cmd](parts.join(" "));
     else log("I don't know how to "+cmd);
-  }else{
-    Object.keys(members).forEach(function(member){
-      members[member].send({message:line, nick:nick});
-    })
-  }
+  }else if(line != "") blast(line);
   rl.prompt();
 });
 
 var cmds = {};
+cmds.nick = function(nick){
+  id.nick = nick;
+  blast(false, nick);
+  rl.setPrompt(id.nick+"> ");
+  rl.prompt();
+}
 cmds.quit = function(err){
   log(err||"poof");
   process.exit();
