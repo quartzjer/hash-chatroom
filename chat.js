@@ -52,7 +52,7 @@ function init()
   rl.prompt();
 
   var seeds = require(argv.seeds);
-  chat = tele.hashname("chat.telehash.org", id);
+  chat = tele.hashname(id);
   seeds.forEach(chat.addSeed);
 
   chat.online(function(err){
