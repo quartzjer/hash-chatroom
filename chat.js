@@ -92,6 +92,18 @@ var nicks = {};
 function incoming(chat, packet, callback)
 {
   callback();
+  if(packet.js.end)
+  {
+    var msg = (packet.js.message||packet.js.err)?" ("+(packet.js.message||packet.js.err)+")":"";
+    if(packet.from.hashname == memberhash && !packet.js.nick)
+    {
+      console.log("couldn't connect to "+memberhash+msg);
+      process.exit(1);
+    }
+    log("bye "+packet.js.nick+msg);
+    delete members[packet.from.hashname];
+    return;
+  }
   if(packet.js.message || packet.js.nick) packet.stream.send({}); // receipt ack, maybe have flag for stream to auto-ack?
 
   if(packet.js.nick) nickel(packet.from.hashname, packet.js.nick);
@@ -100,6 +112,7 @@ function incoming(chat, packet, callback)
 function handshake(chat, packet, callback)
 {
   if(callback) callback();
+  if(packet.js.end) return incoming(chat, packet, function(){});
   if(packet.js.room && packet.js.room != room)
   {
     console.log(packet.js);
