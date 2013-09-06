@@ -59,14 +59,13 @@ function init()
     log((err?err:"online as "+chat.hashname));
     if(err) process.exit(0);
     if(memberhash) {
-      members[memberhash] = chat.stream(memberhash, handshake).send({type:"_chat", nick:id.nick, room:room})
-      chat.stream(memberhash, memberMesh).send({type:"_members", room:room});
+      members[memberhash] = chat.stream(memberhash, "chat", handshake).send({nick:id.nick, room:room})
+      chat.stream(memberhash, "members", memberMesh).send({room:room});
     } else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
   });
 
-  chat.listen("_chat", handshake);
-  chat.listen("_members", function(chat, packet, callback){
-    if(callback) callback();
+  chat.listen("chat", handshake);
+  chat.listen("members", function(err, stream, js){
     // send members in chunks
     var mlist = Object.keys(members);
     while(mlist.length > 0)
@@ -74,63 +73,68 @@ function init()
       var chunk = mlist.slice(0, 10);
       mlist = mlist.slice(10);
       var end = mlist.length == 0 ? true : false;
-      packet.stream.send({members:mlist, end:end});
+      stream.send({members:mlist, end:end});
     }
   });
 }
 
-function memberMesh(chat, packet, callback)
+function memberMesh(err, stream, js)
 {
-  callback();
-  if(Array.isArray(packet.js.members)) packet.js.members.forEach(function(member){
+  if(err) return;
+  if(Array.isArray(js.members)) js.members.forEach(function(member){
     if(members[member]) return;
-    members[member] = chat.stream(member, handshake).send({type:"_chat", nick:id.nick, room:room});
+    members[member] = chat.stream(member, "chat", handshake).send({nick:id.nick, room:room});
   });
 }
 
 var nicks = {};
-function incoming(chat, packet, callback)
+function incoming(err, stream, js)
 {
-  callback();
-  if(packet.js.end)
+  if(err)
   {
-    var msg = (packet.js.message||packet.js.err)?" ("+(packet.js.message||packet.js.err)+")":"";
-    if(packet.from.hashname == memberhash && !packet.js.nick)
+    var msg = " ("+((js&&js.message)||err)+")";
+    log("bye "+stream.nick+msg);
+    delete members[stream.hashname];
+    return;
+  }
+
+  if(js.nick) nickel(stream.hashname, js.nick);
+  if(js.message) log("["+stream.nick+"] "+js.message);
+}
+
+// intitial incoming or answer to outgoing chats
+function handshake(err, stream, js)
+{
+  if(err)
+  {
+    // bootstrapping failure
+    if(stream.hashname == memberhash)
     {
-      console.log("couldn't connect to "+memberhash+msg);
+      console.log("couldn't connect to",memberhash,err);
       process.exit(1);
     }
-    log("bye "+packet.js.nick+msg);
-    delete members[packet.from.hashname];
+    log("failed to connect to member "+stream.hashname);
     return;
   }
-  if(packet.js.message || packet.js.nick) packet.stream.send({}); // receipt ack, maybe have flag for stream to auto-ack?
-
-  if(packet.js.nick) nickel(packet.from.hashname, packet.js.nick);
-  if(packet.js.message) log("["+(packet.stream.nick||packet.from.hashname)+"] "+packet.js.message);
-}
-function handshake(chat, packet, callback)
-{
-  if(callback) callback();
-  if(packet.js.end) return incoming(chat, packet, function(){});
-  if(packet.js.room && packet.js.room != room)
+  if(js.room && js.room != room)
   {
-    console.log(packet.js);
-    packet.stream.send({err:"unknown room"});
+    console.log("barf, wrong room?",js,stream.hashname);
+    stream.send({err:"unknown room"});
     return;
   }
-  log("connected "+packet.js.nick+" ("+packet.from.hashname+")");
-  members[packet.from.hashname] = packet.stream;
-  packet.stream.handler = incoming;
-  nickel(packet.from.hashname, packet.js.nick);
-  if(packet.js.seq == 0) packet.stream.send({nick:id.nick});
-  else packet.stream.send({});
+  log("connected "+js.nick+" ("+stream.hashname+")");
+  // if this is a new stream, make sure they have our nick
+  if(members[stream.hashname] !== stream) stream.send({nick:id.nick});
+  members[stream.hashname] = stream;
+  stream.handler = incoming;
+  nickel(stream.hashname, js.nick);
 }
 
 // update nick
 var nicks = {};
 function nickel(hashname, nick)
 {
+  if(!nick) nick = hashname.substr(0,8);
   nicks[nick] = hashname;
   if(members[hashname].nick && members[hashname].nick != nick) log(members[hashname].nick+" is now known as "+nick);
   members[hashname].nick = nick;
