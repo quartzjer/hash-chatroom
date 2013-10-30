@@ -2,7 +2,7 @@
    "name": "hash-chatroom",
    "version": "0.0.1",
    "dependencies": {
-   	  "telehash": "*",
+   	  "telehash": ">=0.0.58",
 	  "optimist": "*"
    },
   "licenses": [
@@ -10,5 +10,9 @@
     "type": "MIT",
     "url": "https://github.com/quartzjer/hash-chatroom/raw/master/LICENSE"
   }
-  ]
+  ],
+  "engines": {
+    "node": "0.10.x",
+    "npm":  ">1.2.x"
+  }
 }
