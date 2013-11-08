@@ -83,6 +83,7 @@ function memberMesh(err, stream, js)
   if(err) return;
   if(Array.isArray(js.members)) js.members.forEach(function(member){
     if(members[member]) return;
+    if(member == chat.hashname) return;
     members[member] = chat.stream(member, "chat", handshake).send({nick:id.nick, room:room});
   });
 }
