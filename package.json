@@ -1,8 +1,8 @@
 {
    "name": "hash-chatroom",
-   "version": "0.0.1",
+   "version": "0.0.2",
    "dependencies": {
-   	  "telehash": ">=0.0.58",
+   	  "telehash": ">=0.1.0",
 	  "optimist": "*"
    },
   "licenses": [

@@ -53,101 +53,76 @@ function init()
 
   var seeds = require(argv.seeds);
   chat = tele.hashname(id);
-  seeds.forEach(chat.addSeed);
+  seeds.forEach(chat.addSeed, chat);
 
   chat.online(function(err){
     log((err?err:"online as "+chat.hashname));
     if(err) process.exit(0);
     if(memberhash) {
-      members[memberhash] = chat.stream(memberhash, "chat", handshake).send({nick:id.nick, room:room})
-      chat.stream(memberhash, "members", memberMesh).send({room:room});
+      var host = chat.whois(memberhash);
+      if(!host) return log("invalid id to join");
+      host.start("members", {js:{room:room}}, memberMesh);
     } else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
   });
 
-  chat.listen("chat", handshake);
-  chat.listen("members", function(err, stream, js){
+  chat.start("chat", function(arg, chan){
+    if(room != arg.js.room) return chan.end("unknown room");
+    handshake(false, arg, chan);
+    chan.message({js:{nick:id.nick}});
+  });
+  chat.start("members", function(arg, chan){
+    // send members in chunks
+    chan.setup("message");
     // send members in chunks
     var mlist = Object.keys(members);
+    mlist.push(chat.hashname);
     while(mlist.length > 0)
     {
       var chunk = mlist.slice(0, 10);
       mlist = mlist.slice(10);
-      var end = mlist.length == 0 ? true : false;
-      stream.send({members:mlist, end:end});
+      chan.message({js:{members:chunk}});
+      if(mlist.length == 0) chan.end();
     }
   });
 }
 
-function memberMesh(err, stream, js)
+function memberMesh(err, arg)
 {
-  if(err) return;
-  if(Array.isArray(js.members)) js.members.forEach(function(member){
+  if(err) return log("error fetching members: "+err);
+  if(Array.isArray(arg.js.members)) arg.js.members.forEach(function(member){
     if(members[member]) return;
     if(member == chat.hashname) return;
-    members[member] = chat.stream(member, "chat", handshake).send({nick:id.nick, room:room});
+    var hn = chat.whois(member);
+    if(hn) hn.start("chat", {js:{nick:id.nick, room:room}}, handshake);
   });
-}
-
-var nicks = {};
-function incoming(err, stream, js)
-{
-  if(err)
-  {
-    var msg = " ("+((js&&js.message)||err)+")";
-    log("bye "+stream.nick+msg);
-    delete members[stream.hashname];
-    return;
-  }
-
-  if(js.nick) nickel(stream.hashname, js.nick);
-  if(js.message) log("["+stream.nick+"] "+js.message);
 }
 
 // intitial incoming or answer to outgoing chats
-function handshake(err, stream, js)
-{
-  if(err)
-  {
-    // bootstrapping failure
-    if(stream.hashname == memberhash)
-    {
-      console.log("couldn't connect to",memberhash,err);
-      process.exit(1);
-    }
-    log("failed to connect to member "+stream.hashname);
-    return;
-  }
-  if(js.room && js.room != room)
-  {
-    console.log("barf, wrong room?",js,stream.hashname);
-    stream.send({err:"unknown room"});
-    return;
-  }
-  log("connected "+js.nick+" ("+stream.hashname+")");
-  // if this is a new stream, make sure they have our nick
-  if(members[stream.hashname] !== stream) stream.send({nick:id.nick});
-  members[stream.hashname] = stream;
-  stream.handler = incoming;
-  nickel(stream.hashname, js.nick);
-}
-
-// update nick
 var nicks = {};
-function nickel(hashname, nick)
+function handshake(err, arg, chan)
 {
-  if(!nick) nick = hashname.substr(0,8);
-  nicks[nick] = hashname;
-  if(members[hashname].nick && members[hashname].nick != nick) log(members[hashname].nick+" is now known as "+nick);
-  members[hashname].nick = nick;
+  if(err) return console.log("handshake err",err);
+  chan.nick = (arg.js.nick) ? arg.js.nick : chan.hashname.substr(0,6);
+  nicks[chan.nick] = chan.hashname;
+  if(!members[chan.hashname]) log(chan.nick+" joined");
+  members[chan.hashname] = chan;
+  chan.setup("message");
+  chan.onMessage = function(err, arg, cb){
+    if(arg && arg.js.message) log("["+chan.nick+"] "+arg.js.message);
+    if(err)
+    {
+      var msg = (err !== true)?" ("+err+")":"";
+      log(chan.nick+" left"+msg);
+      delete members[chan.hashname];
+    }
+    cb();
+  };
 }
 
-function blast(msg, nick)
+function blast(msg)
 {
   Object.keys(members).forEach(function(member){
-    var js = {};
-    if(msg) js.message = msg;
-    if(nick) js.nick = nick;
-    members[member].send(js);
+    members[member].message({js:{"message":msg}});
   });
 }
 
