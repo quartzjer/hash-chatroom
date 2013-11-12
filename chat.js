@@ -88,8 +88,8 @@ function init()
 
 function memberMesh(err, arg)
 {
-  if(err) return log("error fetching members: "+err);
-  if(Array.isArray(arg.js.members)) arg.js.members.forEach(function(member){
+  if(err && err !== true) return log("error fetching members: "+err);
+  if(arg && Array.isArray(arg.js.members)) arg.js.members.forEach(function(member){
     if(members[member]) return;
     if(member == chat.hashname) return;
     var hn = chat.whois(member);
