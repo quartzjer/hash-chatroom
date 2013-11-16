@@ -65,49 +65,48 @@ function init()
     } else log("hosting room, others can use '"+room+"@"+chat.hashname+"' to join");
   });
 
-  chat.start("chat", function(arg, chan){
-    if(room != arg.js.room) return chan.end("unknown room");
-    handshake(false, arg, chan);
-    chan.message({js:{nick:id.nick}});
+  chat.listen("chat", function(err, arg, chan, cb){
+    if(room != arg.js.room) return chan.err("unknown room");
+    handshake(false, arg, chan, cb);
+    chan.send({js:{nick:id.nick}});
   });
-  chat.start("members", function(arg, chan){
+  chat.listen("members", function(err, arg, chan, cb){
     // send members in chunks
-    chan.setup("message");
-    // send members in chunks
+    cb();
     var mlist = Object.keys(members);
     mlist.push(chat.hashname);
     while(mlist.length > 0)
     {
       var chunk = mlist.slice(0, 10);
       mlist = mlist.slice(10);
-      chan.message({js:{members:chunk}});
+      chan.send({js:{members:chunk}});
       if(mlist.length == 0) chan.end();
     }
   });
 }
 
-function memberMesh(err, arg)
+function memberMesh(err, arg, chan, cb)
 {
   if(err && err !== true) return log("error fetching members: "+err);
-  if(arg && Array.isArray(arg.js.members)) arg.js.members.forEach(function(member){
+  if(Array.isArray(arg.js.members)) arg.js.members.forEach(function(member){
     if(members[member]) return;
     if(member == chat.hashname) return;
     var hn = chat.whois(member);
     if(hn) hn.start("chat", {js:{nick:id.nick, room:room}}, handshake);
   });
+  cb();
 }
 
 // intitial incoming or answer to outgoing chats
 var nicks = {};
-function handshake(err, arg, chan)
+function handshake(err, arg, chan, cb)
 {
   if(err) return console.log("handshake err",err);
   chan.nick = (arg.js.nick) ? arg.js.nick : chan.hashname.substr(0,6);
   nicks[chan.nick] = chan.hashname;
   if(!members[chan.hashname]) log(chan.nick+" joined");
   members[chan.hashname] = chan;
-  chan.setup("message");
-  chan.onMessage = function(err, arg, cb){
+  chan.callback = function(err, arg, chan, cbMessage){
     if(arg && arg.js.message) log("["+chan.nick+"] "+arg.js.message);
     if(err)
     {
@@ -115,14 +114,15 @@ function handshake(err, arg, chan)
       log(chan.nick+" left"+msg);
       delete members[chan.hashname];
     }
-    cb();
+    cbMessage();
   };
+  cb();
 }
 
 function blast(msg)
 {
   Object.keys(members).forEach(function(member){
-    members[member].message({js:{"message":msg}});
+    members[member].send({js:{"message":msg}});
   });
 }
 
